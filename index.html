@@ -1,110 +1,222 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Video Compressor</title>
-  <script src="https://unpkg.com/@ffmpeg/ffmpeg@0.12.6/dist/ffmpeg.min.js"></script>
-  <style>
-    body {
-      font-family: "Poppins", sans-serif;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      height: 100vh;
-      margin: 0;
-      background: linear-gradient(135deg, #5f72be, #9921e8);
-      color: white;
-    }
-    h1 {
-      margin-bottom: 1rem;
-    }
-    input[type="file"] {
-      margin: 1rem 0;
-    }
-    button {
-      background-color: #ff8a00;
-      border: none;
-      padding: 10px 20px;
-      font-size: 16px;
-      border-radius: 10px;
-      cursor: pointer;
-      color: white;
-      transition: 0.2s;
-    }
-    button:hover {
-      background-color: #ff5500;
-    }
-    #progress {
-      margin-top: 1rem;
-      font-size: 14px;
-    }
-    a {
-      margin-top: 1rem;
-      color: #00ffcc;
-      text-decoration: none;
-      font-weight: bold;
-    }
-  </style>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Fast Local Video Compressor — Spark & Nova</title>
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;500;700&display=swap" rel="stylesheet">
+<style>
+  :root{--bg1:#0f172a;--bg2:#0b1220;--accent:#00e6b8}
+  html,body{height:100%;margin:0;font-family:'Poppins',system-ui,Segoe UI,Roboto,Arial; background:linear-gradient(180deg,var(--bg1),var(--bg2)); color:#e6eef8}
+  .wrap{max-width:820px;margin:24px auto;padding:20px;border-radius:12px;box-shadow:0 6px 30px rgba(0,0,0,0.6);background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01))}
+  h1{margin:0 0 8px;font-size:20px}
+  label{display:block;font-size:13px;margin-top:12px}
+  input[type=file]{margin-top:8px}
+  .row{display:flex;gap:10px;align-items:center}
+  .controls{display:flex;gap:10px;margin-top:12px;flex-wrap:wrap}
+  button{background:var(--accent);border:none;padding:10px 14px;border-radius:10px;color:#022;cursor:pointer;font-weight:700}
+  button:disabled{opacity:0.5;cursor:not-allowed}
+  .small{font-size:13px;color:#9fb3c6}
+  progress{width:100%;height:14px;border-radius:8px;overflow:hidden}
+  pre{background:rgba(255,255,255,0.03);padding:8px;border-radius:8px;max-height:160px;overflow:auto;font-size:12px}
+  a.download{display:inline-block;margin-top:12px;padding:10px 12px;border-radius:10px;background:#112233;color:var(--accent);text-decoration:none;font-weight:700}
+  .warn{background:#3b2a2a;padding:8px;border-radius:8px;color:#ffdcdc;margin-top:10px}
+  footer{margin-top:16px;font-size:12px;color:#8ea6b8}
+  .flex-between{display:flex;justify-content:space-between;align-items:center}
+</style>
 </head>
 <body>
-  <h1>⚡ Video Compressor</h1>
-  <input type="file" id="uploader" accept="video/*" />
-  <button id="compressBtn">Compress Video</button>
-  <p id="progress"></p>
-  <a id="downloadLink" style="display: none;">Download Compressed Video</a>
+  <div class="wrap">
+    <div class="flex-between">
+      <h1>⚡ Fast Local Video Compressor</h1>
+      <div class="small">Private — runs in your browser</div>
+    </div>
 
-  <script>
-    const { createFFmpeg, fetchFile } = FFmpeg;
-    const ffmpeg = createFFmpeg({ log: true });
-    const upload = document.getElementById("uploader");
-    const button = document.getElementById("compressBtn");
-    const progress = document.getElementById("progress");
-    const downloadLink = document.getElementById("downloadLink");
+    <label>Choose a video file
+      <input id="file" type="file" accept="video/*"/>
+    </label>
 
-    button.addEventListener("click", async () => {
-      if (!upload.files.length) {
-        alert("Please select a video file first!");
-        return;
-      }
+    <div class="controls">
+      <div>
+        <label>Quality (CRF) — lower = better quality, larger file</label>
+        <input id="crf" type="range" min="18" max="36" value="28"/>
+        <div class="small">CRF: <span id="crfVal">28</span></div>
+      </div>
 
-      const file = upload.files[0];
-      progress.textContent = "Loading FFmpeg (first time takes a bit)...";
-      button.disabled = true;
+      <div>
+        <label>Preset (speed vs. size)</label>
+        <select id="preset">
+          <option value="veryfast">veryfast (fast)</option>
+          <option value="faster">faster</option>
+          <option value="fast">fast</option>
+          <option value="medium" selected>medium (balanced)</option>
+          <option value="slow">slow (smaller)</option>
+        </select>
+        <div class="small">Preset changes CPU time — try "veryfast" if you want speed.</div>
+      </div>
 
-      if (!ffmpeg.isLoaded()) {
+      <div style="align-self:flex-end">
+        <button id="compressBtn">Compress</button>
+      </div>
+    </div>
+
+    <div id="info" class="small" style="margin-top:12px">Status: idle</div>
+    <div style="margin-top:10px">
+      <progress id="progressBar" value="0" max="1" style="display:none"></progress>
+      <div id="progressText" class="small"></div>
+    </div>
+
+    <pre id="log" style="display:none"></pre>
+
+    <a id="download" class="download" style="display:none" href="#" download>⬇️ Download compressed video</a>
+
+    <div id="warning" class="warn" style="display:none"></div>
+
+    <footer>
+      If this page seems stuck, you probably opened it as <code>file://</code>. Run a local server:
+      <div class="small" style="margin-top:6px">
+        Python: <code>python -m http.server 8000</code> • Node: <code>npx http-server .</code>
+      </div>
+    </footer>
+  </div>
+
+<script src="https://unpkg.com/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js"></script>
+<script>
+(async()=> {
+  const { createFFmpeg, fetchFile } = FFmpeg;
+  // You can change corePath if auto-download fails; kept default for most setups.
+  const ffmpeg = createFFmpeg({ log: true, corePath: null });
+
+  const fileInput = document.getElementById('file');
+  const compressBtn = document.getElementById('compressBtn');
+  const crfInput = document.getElementById('crf');
+  const crfVal = document.getElementById('crfVal');
+  const presetSel = document.getElementById('preset');
+  const progressBar = document.getElementById('progressBar');
+  const progressText = document.getElementById('progressText');
+  const info = document.getElementById('info');
+  const logEl = document.getElementById('log');
+  const download = document.getElementById('download');
+  const warning = document.getElementById('warning');
+
+  // UI binds
+  crfInput.addEventListener('input', ()=> crfVal.textContent = crfInput.value);
+
+  // Show helpful warning if opened as file:// (ffmpeg.wasm needs HTTP)
+  if(location.protocol === 'file:'){
+    warning.style.display = 'block';
+    warning.textContent = 'Heads up — you opened this file using file://. FFmpeg wasm often fails when run as file://. Start a local server (see footer) or upload this file to a server to run properly.';
+  }
+
+  // Progress handlers
+  ffmpeg.setProgress(({ ratio })=>{
+    progressBar.style.display = 'block';
+    progressBar.value = ratio;
+    const pct = Math.round(ratio*100);
+    progressText.textContent = `FFmpeg progress: ${pct}%`;
+  });
+
+  // Logger to in-page element
+  ffmpeg.setLogger(({ type, message })=>{
+    logEl.style.display = 'block';
+    logEl.textContent += `[${type}] ${message}\n`;
+    logEl.scrollTop = logEl.scrollHeight;
+  });
+
+  // Safety: check memory & browser
+  function bytesToMB(b){ return (b/1024/1024).toFixed(1) + ' MB'; }
+
+  compressBtn.addEventListener('click', async ()=>{
+    warning.style.display = 'none';
+    logEl.style.display = 'none';
+    logEl.textContent = '';
+    download.style.display = 'none';
+    progressBar.value = 0;
+    progressText.textContent = '';
+    info.textContent = 'Status: starting...';
+
+    if(!fileInput.files || fileInput.files.length === 0){
+      alert('Please choose a video file first!');
+      return;
+    }
+    const file = fileInput.files[0];
+
+    // quick checks
+    if(file.size > 1024*1024*150){ // 150MB soft warning
+      const ok = confirm(`This file is ${bytesToMB(file.size)} — FFmpeg in-browser may be slow or run out of memory. Continue?`);
+      if(!ok) return;
+    }
+
+    compressBtn.disabled = true;
+    try {
+      // load ffmpeg core if not loaded
+      if(!ffmpeg.isLoaded()){
+        info.textContent = 'Status: loading FFmpeg (first time may take a few seconds)...';
         await ffmpeg.load();
       }
 
-      progress.textContent = "Compressing... please wait ⚙️";
+      info.textContent = 'Status: writing file to virtual FS...';
+      const inName = 'input' + (file.name.match(/\.[^\.]+$/) ? file.name.match(/\.[^\.]+$/)[0] : '.mp4');
+      const outName = 'output.mp4';
 
-      const inputName = "input.mp4";
-      const outputName = "output.mp4";
+      ffmpeg.FS('writeFile', inName, await fetchFile(file));
 
-      ffmpeg.FS("writeFile", inputName, await fetchFile(file));
+      // Build ffmpeg args
+      // We copy audio to speed things up (avoid re-encoding audio). If copying fails, ffmpeg will fail and we fall back.
+      const crf = crfInput.value || '28';
+      const preset = presetSel.value || 'veryfast';
+      info.textContent = `Status: compressing (CRF=${crf}, preset=${preset}) — hang tight.`;
+      logEl.style.display = 'block';
+      logEl.textContent += `Running: ffmpeg -i ${inName} -vcodec libx264 -crf ${crf} -preset ${preset} -movflags +faststart -c:a copy ${outName}\n`;
 
-      // Medium compression that keeps good quality
-      await ffmpeg.run(
-        "-i", inputName,
-        "-vcodec", "libx264",
-        "-crf", "28",
-        "-preset", "fast",
-        outputName
-      );
+      // Try fast path (copy audio)
+      try {
+        await ffmpeg.run(
+          '-i', inName,
+          '-vcodec','libx264',
+          '-crf', String(crf),
+          '-preset', preset,
+          '-movflags', '+faststart',
+          '-c:a', 'copy',
+          outName
+        );
+      } catch (e) {
+        // If copying audio fails for some containers, try re-encoding audio (slower but more compatible)
+        logEl.textContent += `Audio copy failed, retrying with audio re-encode. Error: ${e.message}\n`;
+        await ffmpeg.run(
+          '-i', inName,
+          '-vcodec','libx264',
+          '-crf', String(crf),
+          '-preset', preset,
+          '-movflags', '+faststart',
+          '-c:a', 'aac',
+          '-b:a','128k',
+          outName
+        );
+      }
 
-      const data = ffmpeg.FS("readFile", outputName);
-      const blob = new Blob([data.buffer], { type: "video/mp4" });
+      info.textContent = 'Status: reading output from virtual FS...';
+      const data = ffmpeg.FS('readFile', outName);
+      const blob = new Blob([data.buffer], { type: 'video/mp4' });
       const url = URL.createObjectURL(blob);
 
-      downloadLink.href = url;
-      downloadLink.download = "compressed_video.mp4";
-      downloadLink.style.display = "block";
-      downloadLink.textContent = "⬇️ Download Compressed Video";
+      download.href = url;
+      download.download = `compressed_${file.name.replace(/\.[^\.]+$/,'')}.mp4`;
+      download.style.display = 'inline-block';
+      info.textContent = 'Status: done — click download below';
 
-      progress.textContent = "Done!";
-      button.disabled = false;
-    });
-  </script>
+    } catch(err){
+      console.error(err);
+      logEl.style.display = 'block';
+      logEl.textContent += `ERROR: ${err.message}\n`;
+      info.textContent = 'Status: error — check log above';
+      alert('Compression failed. Check the log shown on the page. Common reasons: large file, mobile browser, or opened via file:// (see footer).');
+    } finally {
+      compressBtn.disabled = false;
+    }
+  });
+
+})();
+</script>
 </body>
 </html>
